@@ -315,6 +315,7 @@
     const [ingredients,setIngredients]=useState(()=>ls.get("eco_ingredients",DEF_ING));
     const [showAddDish,setShowAddDish]=useState(false);
     const [showAddIngredient,setShowAddIngredient]=useState(false);
+    const [showAddCook,setShowAddCook]=useState(false);
     const [editIng,setEditIng]=useState(null);
     const [editIngUnit,setEditIngUnit]=useState(null);
     const [newDish,setNewDish]=useState({name:"",emoji:"🍽️"});
@@ -985,7 +986,7 @@
         {/* MODALS */}
         {showAddDish&&(
           <div style={S.overlay} onClick={()=>setShowAddDish(false)}>
-            <div style={S.modal} onClick={e=>e.stopPropagation()}>
+            <div style={{...S.modal,cursor:"default"}} onClick={e=>e.stopPropagation()} onTouchEnd={e=>e.stopPropagation()}>
               <div style={S.modalTitle}>➕ Новое блюдо</div>
               <input style={S.input} placeholder="Название" value={newDish.name} onChange={e=>setNewDish({...newDish,name:e.target.value})}/>
               <input style={S.input} placeholder="Эмодзи (🍽️)" value={newDish.emoji} onChange={e=>setNewDish({...newDish,emoji:e.target.value})}/>
@@ -999,7 +1000,7 @@
         )}
         {showAddCook&&(
           <div style={S.overlay} onClick={()=>setShowAddCook(false)}>
-            <div style={S.modal} onClick={e=>e.stopPropagation()}>
+            <div style={{...S.modal,cursor:"default"}} onClick={e=>e.stopPropagation()} onTouchEnd={e=>e.stopPropagation()}>
               <div style={S.modalTitle}>👨‍🍳 Новый повар</div>
               <input style={S.input} placeholder="Имя повара" value={newCook.name}
                 onChange={e=>setNewCook({...newCook,name:e.target.value})}/>
@@ -1012,8 +1013,9 @@
             </div>
           </div>
         )}
+        {showAddIngredient&&(
           <div style={S.overlay} onClick={()=>setShowAddIngredient(false)}>
-            <div style={S.modal} onClick={e=>e.stopPropagation()}>
+            <div style={{...S.modal,cursor:"default"}} onClick={e=>e.stopPropagation()} onTouchEnd={e=>e.stopPropagation()}>
               <div style={S.modalTitle}>🥬 Новый ингредиент</div>
               <input style={S.input} placeholder="Название" value={newIng.name} onChange={e=>setNewIng({...newIng,name:e.target.value})}/>
               <div style={{marginBottom:12}}>
@@ -1114,7 +1116,7 @@
     savedSidebar:{width:130,flexShrink:0,background:"#fff",borderRadius:14,border:"1.5px solid #e8f5e9",padding:"12px 10px",display:"flex",flexDirection:"column",gap:5,position:"sticky",top:80,alignSelf:"flex-start"},
     savedSidebarTitle:{fontFamily:"'Unbounded',sans-serif",fontSize:9,fontWeight:700,color:"#81c784",textTransform:"uppercase",letterSpacing:"0.5px",marginBottom:3},
     savedDateBtn:{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"6px 9px",borderRadius:9,border:"1.5px solid #e8f5e9",background:"#fff",cursor:"pointer",fontSize:11,fontFamily:"'Geologica',sans-serif",transition:"all 0.15s"},
-    overlay:{position:"fixed",inset:0,background:"rgba(0,0,0,0.35)",backdropFilter:"blur(4px)",zIndex:1000,display:"flex",alignItems:"center",justifyContent:"center"},
+    overlay:{position:"fixed",inset:0,background:"rgba(0,0,0,0.35)",backdropFilter:"blur(4px)",zIndex:1000,display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",WebkitTapHighlightColor:"transparent"},
     modal:{background:"#fff",borderRadius:20,padding:24,minWidth:300,maxWidth:420,width:"90%",boxShadow:"0 16px 60px rgba(0,0,0,0.15)"},
     modalTitle:{fontFamily:"'Unbounded',sans-serif",fontWeight:700,fontSize:16,color:"#1b5e20",marginBottom:16},
     input:{width:"100%",padding:"10px 13px",borderRadius:11,border:"1.5px solid #e8f5e9",fontSize:14,fontFamily:"'Geologica',sans-serif",marginBottom:11,background:"#fafafa",color:"#2d4a2e"},
