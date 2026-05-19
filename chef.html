@@ -126,7 +126,34 @@
     #notify-banner .msg { flex:1; }
     #notify-banner .msg-title { font-size:18px; font-weight:700; }
     #notify-banner .msg-sub { font-size:13px; font-weight:400; margin-top:4px; opacity:0.9; font-family:'Geologica',sans-serif; }
-    #notify-banner .close-n { background:rgba(255,255,255,0.2); border:none; color:#fff; width:36px; height:36px; border-radius:50%; font-size:18px; cursor:pointer; }
+    #notify-banner .close-n { background:rgba(255,255,255,0.25); border:none; color:#fff; padding:8px 16px; border-radius:20px; font-size:13px; cursor:pointer; font-family:'Geologica',sans-serif; font-weight:600; white-space:nowrap; }
+    #notify-banner .close-n:hover { background:rgba(255,255,255,0.4); }
+
+    /* Call admin button */
+    #call-btn {
+      position: fixed;
+      bottom: 30px;
+      right: 30px;
+      padding: 16px 24px;
+      background: #e65100;
+      color: #fff;
+      border: none;
+      border-radius: 50px;
+      font-family: 'Unbounded', sans-serif;
+      font-size: 14px;
+      font-weight: 700;
+      cursor: pointer;
+      box-shadow: 0 6px 24px rgba(230,81,0,0.5);
+      z-index: 200;
+      transition: all 0.2s;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    #call-btn:hover:not(:disabled) { transform: translateY(-2px); box-shadow: 0 10px 32px rgba(230,81,0,0.6); }
+    #call-btn:disabled { opacity: 0.7; cursor: default; transform: none; }
+    @keyframes callPulse { 0%,100%{box-shadow:0 6px 24px rgba(230,81,0,0.5)} 50%{box-shadow:0 6px 36px rgba(230,81,0,0.8)} }
+    #call-btn:not(:disabled) { animation: callPulse 2s infinite; }
   </style>
 </head>
 <body>
@@ -138,7 +165,7 @@
     <div class="msg-title">Администратор отправил меню!</div>
     <div class="msg-sub">Проверьте список блюд и приступайте к приготовлению</div>
   </div>
-  <button class="close-n" onclick="document.getElementById('notify-banner').style.display='none'">✕</button>
+  <button class="close-n" onclick="closeNotification()">✕ Закрыть</button>
 </div>
 
 <header class="header">
@@ -162,6 +189,11 @@
     <div class="empty-sub">Загружаем меню от администратора</div>
   </div>
 </main>
+
+<!-- Call admin button — always visible -->
+<button id="call-btn" onclick="callAdmin()">
+  📞 Вызвать администратора
+</button>
 
 <script>
   // ── Firebase ───────────────────────────────────────────────────────────────
@@ -317,38 +349,79 @@
     `;
   }
 
-  // ── Notification sound (Web Audio API) ────────────────────────────────────
-  function playChime() {
+  // ── Notification sound — repeats 5 times or until banner closed ──────────
+  let chimeInterval = null;
+  let chimeCount = 0;
+
+  function playChimeOnce() {
     try {
       const ctx = new (window.AudioContext || window.webkitAudioContext)();
-      const notes = [523.25, 659.25, 783.99, 1046.50]; // C5 E5 G5 C6
+      const notes = [523.25, 659.25, 783.99, 1046.50];
       notes.forEach((freq, i) => {
         const osc = ctx.createOscillator();
         const gain = ctx.createGain();
-        osc.connect(gain);
-        gain.connect(ctx.destination);
-        osc.type = "sine";
-        osc.frequency.value = freq;
+        osc.connect(gain); gain.connect(ctx.destination);
+        osc.type = "sine"; osc.frequency.value = freq;
         const start = ctx.currentTime + i * 0.18;
         gain.gain.setValueAtTime(0, start);
         gain.gain.linearRampToValueAtTime(0.4, start + 0.05);
         gain.gain.exponentialRampToValueAtTime(0.001, start + 0.5);
-        osc.start(start);
-        osc.stop(start + 0.5);
+        osc.start(start); osc.stop(start + 0.5);
       });
     } catch(e) {}
   }
 
+  function stopChime() {
+    if (chimeInterval) { clearInterval(chimeInterval); chimeInterval = null; chimeCount = 0; }
+  }
+
+  function startChime() {
+    stopChime();
+    chimeCount = 0;
+    playChimeOnce();
+    chimeCount++;
+    chimeInterval = setInterval(() => {
+      if (chimeCount >= 5) { stopChime(); return; }
+      playChimeOnce();
+      chimeCount++;
+    }, 2200);
+  }
+
   function showNotification() {
-    playChime();
-    // Flash banner
+    startChime();
     const banner = document.getElementById("notify-banner");
     if (banner) {
       banner.style.display = "flex";
-      banner.style.animation = "none";
-      banner.offsetHeight; // reflow
-      banner.style.animation = "flashBanner 0.5s ease 3";
-      setTimeout(() => { banner.style.display = "none"; }, 8000);
+    }
+  }
+
+  function closeNotification() {
+    stopChime();
+    const banner = document.getElementById("notify-banner");
+    if (banner) banner.style.display = "none";
+  }
+
+  // ── Call Admin ─────────────────────────────────────────────────────────────
+  let callCooldown = false;
+
+  function callAdmin() {
+    if (callCooldown) return;
+    callCooldown = true;
+    const ts = Date.now();
+    db.ref("callAdmin").set({ ts, message: "Повар вызывает администратора!" }).catch(() => {});
+
+    // Update button
+    const btn = document.getElementById("call-btn");
+    if (btn) {
+      btn.textContent = "✓ Вызов отправлен";
+      btn.style.background = "#388e3c";
+      btn.disabled = true;
+      setTimeout(() => {
+        btn.textContent = "📞 Вызвать администратора";
+        btn.style.background = "#e65100";
+        btn.disabled = false;
+        callCooldown = false;
+      }, 10000);
     }
   }
 

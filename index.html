@@ -343,6 +343,7 @@ function App(){
   const [savedDates,setSavedDates]=useState([]);
   const [syncStatus,setSyncStatus]=useState("ok");
   const [published,setPublished]=useState(false);
+  const [chefCalling,setChefCalling]=useState(false);
   const [scheduleDate,setScheduleDate]=useState(()=>new Date().toISOString().slice(0,10));
   const [scheduleData,setScheduleData]=useState({});
   const [purchases,setPurchases]=useState({});
@@ -368,6 +369,54 @@ function App(){
       const d=snap.val();
       setSavedDates(d?Object.keys(d).sort().reverse():[]);
     });
+
+    // Request notification permission & listen for chef calls
+    useEffect(()=>{
+      if("Notification"in window && Notification.permission==="default"){
+        Notification.requestPermission();
+      }
+      let lastCall=null;
+      const ref=db.ref("callAdmin");
+      ref.on("value",snap=>{
+        const val=snap.val();
+        if(val&&val.ts&&val.ts!==lastCall&&lastCall!==null){
+          setChefCalling(true);
+          setTimeout(()=>setChefCalling(false),15000);
+          // Browser notification
+          if(Notification.permission==="granted"){
+            const n=new Notification("📞 Вызов от повара!",{
+              body:val.message||"Повар вызывает администратора",
+              icon:"data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='20' fill='%232e7d32'/><text y='.9em' font-size='80' x='10'>🌿</text></svg>",
+              requireInteraction:true,
+              vibrate:[200,100,200],
+              tag:"chef-call",
+            });
+            n.onclick=()=>{window.focus();n.close();};
+          }
+          // Also play sound if tab is visible
+          try{
+            const ctx=new(window.AudioContext||window.webkitAudioContext)();
+            [880,1047,1319].forEach((freq,i)=>{
+              const o=ctx.createOscillator(),g=ctx.createGain();
+              o.connect(g);g.connect(ctx.destination);
+              o.type="triangle";o.frequency.value=freq;
+              const t=ctx.currentTime+i*0.15;
+              g.gain.setValueAtTime(0,t);g.gain.linearRampToValueAtTime(0.35,t+0.05);
+              g.gain.exponentialRampToValueAtTime(0.001,t+0.4);
+              o.start(t);o.stop(t+0.4);
+            });
+          }catch{}
+          // Service worker notification (works when tab not focused)
+          if("serviceWorker"in navigator){
+            navigator.serviceWorker.ready.then(reg=>{
+              reg.active?.postMessage({type:"CALL_ADMIN",message:val.message});
+            });
+          }
+        }
+        lastCall=val?.ts||null;
+      });
+      return()=>ref.off();
+    },[]);
   },[]);
 
   // Day portions
@@ -481,6 +530,19 @@ function App(){
       </header>
 
       <main style={S.main}>
+        {/* Chef call banner */}
+        {chefCalling&&(
+          <div style={{position:"fixed",top:0,left:0,right:0,zIndex:999,background:"linear-gradient(135deg,#e65100,#ff6d00)",color:"#fff",padding:"16px 20px",display:"flex",alignItems:"center",gap:14,boxShadow:"0 4px 24px rgba(230,81,0,0.5)",animation:"pulse 0.8s infinite alternate"}}>
+            <span style={{fontSize:32}}>📞</span>
+            <div style={{flex:1}}>
+              <div style={{fontFamily:"'Unbounded',sans-serif",fontSize:15,fontWeight:700}}>Повар вызывает администратора!</div>
+              <div style={{fontSize:12,opacity:0.9,marginTop:3}}>Зайдите на кухню или свяжитесь с поваром</div>
+            </div>
+            <button onClick={()=>setChefCalling(false)} style={{background:"rgba(255,255,255,0.25)",border:"none",color:"#fff",padding:"8px 16px",borderRadius:20,cursor:"pointer",fontFamily:"'Geologica',sans-serif",fontSize:13,fontWeight:600,whiteSpace:"nowrap"}}>
+              Принято ✓
+            </button>
+          </div>
+        )}
 
         {/* DISHES */}
         {tab==="dishes"&&(
