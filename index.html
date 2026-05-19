@@ -58,8 +58,10 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
 
-<script>
-  // ── Firebase init ──────────────────────────────────────────────────────────
+<script type="text/babel">
+  const { useState, useRef, useEffect, useCallback } = React;
+
+  // ── Firebase init ────────────────────────────────────────────────────────
   const firebaseConfig = {
     apiKey: "AIzaSyBNnRqrkkBBq9VcplpavUK1V3MEbubRzi4",
     authDomain: "ecolavka-dc08f.firebaseapp.com",
@@ -69,12 +71,8 @@
     messagingSenderId: "507953295640",
     appId: "1:507953295640:web:067e5c6a148db0166f2e6d"
   };
-  firebase.initializeApp(firebaseConfig);
+  if (!firebase.apps.length) firebase.initializeApp(firebaseConfig);
   const db = firebase.database();
-</script>
-
-<script type="text/babel">
-  const { useState, useRef, useEffect, useCallback } = React;
 
   // ── localStorage helpers ───────────────────────────────────────────────────
   const ls = {
@@ -327,7 +325,33 @@
     const [chefDone,setChefDone]=useState({});
     const [menuDate,setMenuDate]=useState(()=>new Date().toISOString().slice(0,10));
     const [savedDates,setSavedDates]=useState([]);
-    const [syncStatus,setSyncStatus]=useState("ok"); // ok | saving
+    const [syncStatus,setSyncStatus]=useState("ok");
+    const [published,setPublished]=useState(false);
+
+    // Schedule
+    const DEF_COOKS = [
+      {id:1,name:"Повар 1",salary:2000,working:false},
+      {id:2,name:"Повар 2",salary:2000,working:false},
+      {id:3,name:"Повар 3",salary:2000,working:false},
+      {id:4,name:"Повар 4",salary:2000,working:false},
+      {id:5,name:"Повар 5",salary:2000,working:false},
+    ];
+    const [cooks,setCooks]=useState(()=>ls.get("eco_cooks",DEF_COOKS));
+    const [scheduleDate,setScheduleDate]=useState(()=>new Date().toISOString().slice(0,10));
+    const [scheduleData,setScheduleData]=useState({}); // {date: {cookId: working}}
+    const [editCook,setEditCook]=useState(null); // {id, name, salary}
+    const [showAddCook,setShowAddCook]=useState(false);
+    const [newCook,setNewCook]=useState({name:"",salary:""});
+
+    // Purchases
+    const [purchases,setPurchases]=useState({}); // { date: [{id,supplier,amount}] }
+    const [purchaseDate,setPurchaseDate]=useState(()=>new Date().toISOString().slice(0,10));
+    const [periodFrom,setPeriodFrom]=useState(()=>new Date().toISOString().slice(0,10));
+    const [periodTo,setPeriodTo]=useState(()=>new Date().toISOString().slice(0,10));
+    const [showPeriod,setShowPeriod]=useState(false);
+    const [newPurchase,setNewPurchase]=useState({supplier:"",amount:""});
+    const [editPurchase,setEditPurchase]=useState(null);
+    const [addingPurchase,setAddingPurchase]=useState(false); // ok | saving
     const today=new Date().toISOString().slice(0,10);
     const isReadOnly=menuDate<today;
 
@@ -391,6 +415,14 @@
       db.ref(`daymenu/${menuDate}/portions`).set({}).catch(()=>{});
     };
 
+    const publishMenu=async()=>{
+      if(isReadOnly||dayPortionsTotal===0)return;
+      const ts=Date.now();
+      await db.ref(`daymenu/${menuDate}/published`).set(ts).catch(()=>{});
+      setPublished(true);
+      setTimeout(()=>setPublished(false),4000);
+    };
+
     // ── Dish & ingredient helpers ─────────────────────────────────────────
     const updateDish=(id,patch)=>setDishes(p=>p.map(d=>d.id===id?{...d,...patch}:d));
     const deleteDish=(id)=>setDishes(p=>p.filter(d=>d.id!==id));
@@ -410,6 +442,75 @@
 
     const saveIngCost=(id,c)=>{setIngredients(p=>p.map(i=>i.id===id?{...i,costPer:Number(c)}:i));setEditIng(null);};
     const saveIngUnit=(id,u)=>{setIngredients(p=>p.map(i=>i.id===id?{...i,unit:u}:i));setEditIngUnit(null);};
+
+    // Cooks persistence
+    useEffect(()=>{ ls.set("eco_cooks",cooks); db.ref("cooks").set(cooks).catch(()=>{}); },[cooks]);
+
+    // Purchases — load all from Firebase once
+    useEffect(()=>{
+      const ref=db.ref("purchases");
+      ref.on("value",snap=>{ setPurchases(snap.val()||{}); });
+      return()=>ref.off();
+    },[]);
+
+    const addPurchase=()=>{
+      if(!newPurchase.supplier||!newPurchase.amount)return;
+      const entry={id:Date.now(),supplier:newPurchase.supplier,amount:Number(newPurchase.amount)};
+      const dayList=[...(purchases[purchaseDate]||[]),entry];
+      db.ref(`purchases/${purchaseDate}`).set(dayList).catch(()=>{});
+      setNewPurchase({supplier:"",amount:""});
+      setAddingPurchase(false);
+    };
+
+    const deletePurchase=(date,id)=>{
+      const dayList=(purchases[date]||[]).filter(p=>p.id!==id);
+      db.ref(`purchases/${date}`).set(dayList.length?dayList:null).catch(()=>{});
+    };
+
+    const saveEditPurchase=()=>{
+      if(!editPurchase)return;
+      const dayList=(purchases[editPurchase.date]||[]).map(p=>p.id===editPurchase.id?{...p,supplier:editPurchase.supplier,amount:Number(editPurchase.amount)}:p);
+      db.ref(`purchases/${editPurchase.date}`).set(dayList).catch(()=>{});
+      setEditPurchase(null);
+    };
+
+    // Day purchases
+    const dayPurchases=purchases[purchaseDate]||[];
+    const dayPurchaseTotal=dayPurchases.reduce((s,p)=>s+(p.amount||0),0);
+
+    // Period purchases
+    const periodPurchases=Object.entries(purchases)
+      .filter(([date])=>date>=periodFrom&&date<=periodTo)
+      .sort(([a],[b])=>a.localeCompare(b));
+    const periodTotal=periodPurchases.reduce((s,[,list])=>s+list.reduce((ss,p)=>ss+(p.amount||0),0),0);
+
+    // Schedule data (which cooks work on which date)
+    useEffect(()=>{
+      const ref=db.ref(`schedule/${scheduleDate}`);
+      ref.on("value",snap=>{ setScheduleData(snap.val()||{}); });
+      return()=>ref.off();
+    },[scheduleDate]);
+
+    const toggleCookWorking=(cookId)=>{
+      const current=scheduleData[cookId]||false;
+      db.ref(`schedule/${scheduleDate}/${cookId}`).set(!current).catch(()=>{});
+    };
+
+    const saveCook=(id,name,salary)=>{
+      setCooks(p=>p.map(c=>c.id===id?{...c,name,salary:Number(salary)}:c));
+      setEditCook(null);
+    };
+
+    const deleteCook=(id)=>setCooks(p=>p.filter(c=>c.id!==id));
+
+    const addCook=()=>{
+      if(!newCook.name)return;
+      setCooks(p=>[...p,{id:Date.now(),name:newCook.name,salary:Number(newCook.salary)||0}]);
+      setNewCook({name:"",salary:""}); setShowAddCook(false);
+    };
+
+    const workingCooks=cooks.filter(c=>scheduleData[c.id]);
+    const totalSalary=workingCooks.reduce((s,c)=>s+c.salary,0);
 
     // ── Computed ──────────────────────────────────────────────────────────
     const activeDay=dishes.map(d=>({dish:d,portions:dayPortions[d.id]||0})).filter(x=>x.portions>0);
@@ -438,7 +539,7 @@
             </div>
           </div>
           <div style={{display:"flex",gap:6}}>
-            {[{key:"dishes",label:"🍽️ Блюда"},{key:"ingredients",label:"🥬 Ингред."},{key:"daymenu",label:"📋 Меню"}].map(({key,label})=>(
+            {[{key:"dishes",label:"🍽️ Блюда"},{key:"ingredients",label:"🥬 Ингред."},{key:"daymenu",label:"📋 Меню"},{key:"schedule",label:"👨‍🍳 График"},{key:"purchases",label:"🛒 Закупки"}].map(({key,label})=>(
               <button key={key} className="tab-btn" onClick={()=>setTab(key)} style={{...S.tabBtn,...(tab===key?S.tabActive:{})}}>{label}</button>
             ))}
           </div>
@@ -529,6 +630,11 @@
                 <div style={{display:"flex",gap:8,alignItems:"center"}}>
                   <input type="date" style={{...S.input,width:"auto",marginBottom:0,padding:"7px 10px",fontSize:13}} value={menuDate} onChange={e=>setMenuDate(e.target.value)}/>
                   {!isReadOnly&&dayPortionsTotal>0&&<button className="clear-day-btn" style={S.clearDayBtn} onClick={clearDayMenu}>Сбросить</button>}
+                  {!isReadOnly&&dayPortionsTotal>0&&(
+                    <button onClick={publishMenu} style={{padding:"8px 16px",background:published?"#388e3c":"#1b5e20",color:"#fff",border:"none",borderRadius:20,fontFamily:"'Geologica',sans-serif",fontSize:13,fontWeight:600,cursor:"pointer",transition:"all 0.3s",display:"flex",alignItems:"center",gap:6}}>
+                      {published?"✓ Отправлено!":"🔔 Отправить повару"}
+                    </button>
+                  )}
                 </div>
               </div>
 
@@ -597,6 +703,283 @@
               </div>
             </>
           )}
+          {/* SCHEDULE */}
+          {tab==="schedule"&&(
+            <>
+              <div style={S.secHead}>
+                <div>
+                  <div style={S.secTitle}>👨‍🍳 График работы</div>
+                  <div style={S.secHint}>Отметьте кто работает сегодня</div>
+                </div>
+                <div style={{display:"flex",gap:8,alignItems:"center"}}>
+                  <input type="date" style={{...S.input,width:"auto",marginBottom:0,padding:"7px 10px",fontSize:13}}
+                    value={scheduleDate} onChange={e=>setScheduleDate(e.target.value)}/>
+                  <button className="add-btn" style={S.addBtn} onClick={()=>setShowAddCook(true)}>+ Повар</button>
+                </div>
+              </div>
+
+              {/* Summary card */}
+              <div style={{background:"linear-gradient(135deg,#1b5e20,#2e7d32)",borderRadius:16,padding:"18px 22px",marginBottom:20,display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+                <div>
+                  <div style={{fontFamily:"'Unbounded',sans-serif",fontSize:11,fontWeight:700,color:"#a5d6a7",textTransform:"uppercase",letterSpacing:"0.5px",marginBottom:6}}>
+                    {new Date(scheduleDate+"T00:00:00").toLocaleDateString("ru-RU",{weekday:"long",day:"numeric",month:"long"})}
+                  </div>
+                  <div style={{fontFamily:"'Unbounded',sans-serif",fontSize:13,fontWeight:700,color:"#fff"}}>
+                    Работает: {workingCooks.length} из {cooks.length} поваров
+                  </div>
+                </div>
+                <div style={{textAlign:"right"}}>
+                  <div style={{fontSize:11,color:"#a5d6a7",marginBottom:4}}>Итого зарплата</div>
+                  <div style={{fontFamily:"'Unbounded',sans-serif",fontSize:26,fontWeight:900,color:"#fff"}}>
+                    {totalSalary.toLocaleString("ru-RU")} ₽
+                  </div>
+                </div>
+              </div>
+
+              {/* Table header */}
+              <div style={{display:"flex",alignItems:"center",padding:"8px 16px 6px",fontSize:10,color:"#bdbdbd",textTransform:"uppercase",letterSpacing:"0.5px",fontWeight:600,marginBottom:6}}>
+                <span style={{width:44}}/>
+                <span style={{flex:1}}>Имя повара</span>
+                <span style={{width:130,textAlign:"center"}}>Ставка в день</span>
+                <span style={{width:110,textAlign:"center"}}>Статус</span>
+                <span style={{width:90,textAlign:"right"}}>К выплате</span>
+                <span style={{width:60}}/>
+              </div>
+
+              {/* Cooks list */}
+              <div style={{display:"flex",flexDirection:"column",gap:8,marginBottom:24}}>
+                {cooks.map((cook,idx)=>{
+                  const isWorking=!!scheduleData[cook.id];
+                  const isEditing=editCook?.id===cook.id;
+                  return (
+                    <div key={cook.id} style={{display:"flex",alignItems:"center",gap:10,padding:"12px 16px",background:"#fff",borderRadius:14,border:`2px solid ${isWorking?"#a5d6a7":"#f0f0f0"}`,transition:"all 0.2s"}}>
+                      {/* Number */}
+                      <div style={{width:28,height:28,borderRadius:"50%",background:isWorking?"#e8f5e9":"#f5f5f5",color:isWorking?"#2e7d32":"#bbb",fontSize:12,fontWeight:700,display:"flex",alignItems:"center",justifyContent:"center",fontFamily:"'Unbounded',sans-serif",flexShrink:0}}>
+                        {idx+1}
+                      </div>
+
+                      {/* Name & salary — editable */}
+                      {isEditing ? (
+                        <div style={{flex:1,display:"flex",gap:8,alignItems:"center"}}>
+                          <input autoFocus style={{...S.qtyInput,width:"auto",flex:1,textAlign:"left"}}
+                            value={editCook.name} onChange={e=>setEditCook({...editCook,name:e.target.value})}
+                            placeholder="Имя"/>
+                          <input type="number" style={{...S.qtyInput,width:100}}
+                            value={editCook.salary} onChange={e=>setEditCook({...editCook,salary:e.target.value})}
+                            placeholder="₽/день"/>
+                          <span style={{fontSize:11,color:"#9e9e9e"}}>₽</span>
+                          <button style={S.okBtn} onClick={()=>saveCook(cook.id,editCook.name,editCook.salary)}>✓</button>
+                          <button style={S.cancelSmBtn} onClick={()=>setEditCook(null)}>✕</button>
+                        </div>
+                      ) : (
+                        <>
+                          <span style={{flex:1,fontFamily:"'Unbounded',sans-serif",fontSize:13,fontWeight:700,color:isWorking?"#1b5e20":"#9e9e9e"}}>{cook.name}</span>
+                          <span style={{width:130,textAlign:"center",fontSize:13,color:"#555",fontWeight:500}}>{cook.salary.toLocaleString("ru-RU")} ₽/день</span>
+                        </>
+                      )}
+
+                      {/* Working toggle */}
+                      {!isEditing&&(
+                        <div style={{width:110,display:"flex",justifyContent:"center"}}>
+                          <button onClick={()=>toggleCookWorking(cook.id)}
+                            style={{padding:"6px 14px",borderRadius:20,border:`2px solid ${isWorking?"#4caf50":"#e0e0e0"}`,background:isWorking?"#4caf50":"#f5f5f5",color:isWorking?"#fff":"#9e9e9e",fontSize:12,fontWeight:600,cursor:"pointer",fontFamily:"'Geologica',sans-serif",transition:"all 0.2s",whiteSpace:"nowrap"}}>
+                            {isWorking?"✓ Работает":"Выходной"}
+                          </button>
+                        </div>
+                      )}
+
+                      {/* К выплате */}
+                      {!isEditing&&(
+                        <span style={{width:90,textAlign:"right",fontSize:14,fontWeight:700,color:isWorking?"#2e7d32":"#ccc",fontFamily:"'Unbounded',sans-serif"}}>
+                          {isWorking?`${cook.salary.toLocaleString("ru-RU")} ₽`:"—"}
+                        </span>
+                      )}
+
+                      {/* Edit / delete */}
+                      {!isEditing&&(
+                        <div style={{width:60,display:"flex",gap:4,justifyContent:"flex-end"}}>
+                          <button className="edit-cost-btn" style={{...S.okBtn,background:"#f1f8e9",color:"#4caf50",fontSize:13}} onClick={()=>setEditCook({id:cook.id,name:cook.name,salary:cook.salary})}>✎</button>
+                          <button className="close-btn" style={S.removeBtn} onClick={()=>deleteCook(cook.id)}>✕</button>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* Total footer */}
+              {cooks.length>0&&(
+                <div style={{background:"#fff",borderRadius:16,border:"2px solid #e8f5e9",overflow:"hidden"}}>
+                  <div style={{padding:"14px 18px",borderBottom:"1px solid #f1f8e9",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                    <span style={{fontSize:13,color:"#555"}}>Поваров работает:</span>
+                    <span style={{fontFamily:"'Unbounded',sans-serif",fontWeight:700,fontSize:14,color:"#2e7d32"}}>{workingCooks.length} чел.</span>
+                  </div>
+                  <div style={{padding:"14px 18px",borderBottom:"1px solid #f1f8e9",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                    <span style={{fontSize:13,color:"#555"}}>На выходном:</span>
+                    <span style={{fontFamily:"'Unbounded',sans-serif",fontWeight:700,fontSize:14,color:"#9e9e9e"}}>{cooks.length-workingCooks.length} чел.</span>
+                  </div>
+                  <div style={{padding:"16px 18px",display:"flex",justifyContent:"space-between",alignItems:"center",background:"#f9fbe7"}}>
+                    <span style={{fontSize:14,fontWeight:600,color:"#555"}}>💰 Итого зарплата за день:</span>
+                    <span style={{fontFamily:"'Unbounded',sans-serif",fontWeight:900,fontSize:20,color:"#e65100"}}>{totalSalary.toLocaleString("ru-RU")} ₽</span>
+                  </div>
+                </div>
+              )}
+            </>
+          )}
+          {/* PURCHASES */}
+          {tab==="purchases"&&(
+            <>
+              <div style={S.secHead}>
+                <div><div style={S.secTitle}>🛒 Закупки</div><div style={S.secHint}>Поставщики и суммы</div></div>
+                <div style={{display:"flex",gap:8,alignItems:"center"}}>
+                  <button onClick={()=>setShowPeriod(v=>!v)} style={{...S.tabBtn,...(showPeriod?S.tabActive:{}),fontSize:12,padding:"7px 14px"}}>
+                    {showPeriod?"✕ Период":"📅 Период"}
+                  </button>
+                </div>
+              </div>
+
+              {/* Period selector */}
+              {showPeriod&&(
+                <div style={{background:"#fff",border:"2px solid #e8f5e9",borderRadius:16,padding:"18px 20px",marginBottom:20}}>
+                  <div style={{fontFamily:"'Unbounded',sans-serif",fontSize:12,fontWeight:700,color:"#2e7d32",marginBottom:14}}>📅 Выбор периода</div>
+                  <div style={{display:"flex",gap:12,alignItems:"center",flexWrap:"wrap",marginBottom:16}}>
+                    <div style={{display:"flex",alignItems:"center",gap:8}}>
+                      <span style={{fontSize:12,color:"#9e9e9e"}}>С:</span>
+                      <input type="date" style={{...S.input,marginBottom:0,width:"auto",padding:"7px 10px",fontSize:13}} value={periodFrom} onChange={e=>setPeriodFrom(e.target.value)}/>
+                    </div>
+                    <div style={{display:"flex",alignItems:"center",gap:8}}>
+                      <span style={{fontSize:12,color:"#9e9e9e"}}>По:</span>
+                      <input type="date" style={{...S.input,marginBottom:0,width:"auto",padding:"7px 10px",fontSize:13}} value={periodTo} onChange={e=>setPeriodTo(e.target.value)}/>
+                    </div>
+                  </div>
+
+                  {/* Period summary */}
+                  <div style={{background:"linear-gradient(135deg,#1b5e20,#2e7d32)",borderRadius:12,padding:"14px 18px",marginBottom:periodPurchases.length?14:0,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                    <div style={{fontSize:12,color:"#a5d6a7"}}>
+                      {periodPurchases.reduce((s,[,l])=>s+l.length,0)} записей за период
+                    </div>
+                    <div style={{fontFamily:"'Unbounded',sans-serif",fontSize:22,fontWeight:900,color:"#fff"}}>
+                      {periodTotal.toLocaleString("ru-RU")} ₽
+                    </div>
+                  </div>
+
+                  {/* Period breakdown by date */}
+                  {periodPurchases.length>0&&(
+                    <div style={{display:"flex",flexDirection:"column",gap:8}}>
+                      {periodPurchases.map(([date,list])=>{
+                        const dateTotal=list.reduce((s,p)=>s+(p.amount||0),0);
+                        return(
+                          <div key={date} style={{background:"#f9fbe7",borderRadius:12,padding:"10px 14px",border:"1px solid #e8f5e9"}}>
+                            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:list.length?6:0}}>
+                              <span style={{fontFamily:"'Unbounded',sans-serif",fontSize:11,fontWeight:700,color:"#388e3c"}}>
+                                {new Date(date+"T00:00:00").toLocaleDateString("ru-RU",{day:"numeric",month:"short",weekday:"short"})}
+                              </span>
+                              <span style={{fontFamily:"'Unbounded',sans-serif",fontSize:13,fontWeight:700,color:"#e65100"}}>
+                                {dateTotal.toLocaleString("ru-RU")} ₽
+                              </span>
+                            </div>
+                            {list.map(p=>(
+                              <div key={p.id} style={{display:"flex",justifyContent:"space-between",fontSize:12,color:"#555",padding:"2px 0"}}>
+                                <span>{p.supplier}</span>
+                                <span style={{fontWeight:600}}>{p.amount.toLocaleString("ru-RU")} ₽</span>
+                              </div>
+                            ))}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+
+                  {periodPurchases.length===0&&(
+                    <div style={{textAlign:"center",padding:"20px 0",fontSize:13,color:"#bdbdbd"}}>Нет закупок за выбранный период</div>
+                  )}
+                </div>
+              )}
+
+              {/* Day selector */}
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
+                <div style={{display:"flex",alignItems:"center",gap:10}}>
+                  <input type="date" style={{...S.input,width:"auto",marginBottom:0,padding:"7px 10px",fontSize:13}} value={purchaseDate} onChange={e=>setPurchaseDate(e.target.value)}/>
+                  <span style={{fontSize:12,color:"#81c784"}}>
+                    {dayPurchases.length} {dayPurchases.length===1?"запись":"записей"}
+                  </span>
+                </div>
+                <button className="add-btn" style={S.addBtn} onClick={()=>setAddingPurchase(true)}>+ Добавить</button>
+              </div>
+
+              {/* Day total */}
+              {dayPurchases.length>0&&(
+                <div style={{background:"linear-gradient(135deg,#e8f5e9,#f1f8e9)",border:"2px solid #a5d6a7",borderRadius:14,padding:"12px 18px",marginBottom:14,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                  <span style={{fontSize:13,color:"#388e3c",fontWeight:500}}>
+                    Итого за {new Date(purchaseDate+"T00:00:00").toLocaleDateString("ru-RU",{day:"numeric",month:"long"})}
+                  </span>
+                  <span style={{fontFamily:"'Unbounded',sans-serif",fontSize:18,fontWeight:900,color:"#e65100"}}>
+                    {dayPurchaseTotal.toLocaleString("ru-RU")} ₽
+                  </span>
+                </div>
+              )}
+
+              {/* Add purchase form */}
+              {addingPurchase&&(
+                <div style={{background:"#fff",border:"2px solid #4caf50",borderRadius:14,padding:"16px",marginBottom:14}}>
+                  <div style={{fontFamily:"'Unbounded',sans-serif",fontSize:12,fontWeight:700,color:"#2e7d32",marginBottom:12}}>Новая закупка</div>
+                  <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
+                    <input style={{...S.input,marginBottom:0,flex:2,minWidth:140}} placeholder="Поставщик"
+                      value={newPurchase.supplier} onChange={e=>setNewPurchase({...newPurchase,supplier:e.target.value})}
+                      onKeyDown={e=>{if(e.key==="Enter")addPurchase();}}/>
+                    <div style={{display:"flex",alignItems:"center",gap:4,flex:1,minWidth:100}}>
+                      <input type="number" style={{...S.input,marginBottom:0,flex:1}} placeholder="Сумма"
+                        value={newPurchase.amount} onChange={e=>setNewPurchase({...newPurchase,amount:e.target.value})}
+                        onKeyDown={e=>{if(e.key==="Enter")addPurchase();}}/>
+                      <span style={{fontSize:12,color:"#9e9e9e",whiteSpace:"nowrap"}}>₽</span>
+                    </div>
+                    <button className="add-btn" style={{...S.addBtn,padding:"9px 16px",whiteSpace:"nowrap"}} onClick={addPurchase}>Сохранить</button>
+                    <button style={S.cancelBtn} onClick={()=>{setAddingPurchase(false);setNewPurchase({supplier:"",amount:""});}}>✕</button>
+                  </div>
+                </div>
+              )}
+
+              {/* Purchases list */}
+              {dayPurchases.length===0&&!addingPurchase&&(
+                <div style={S.emptySearch}>
+                  <div style={{fontSize:36,marginBottom:10}}>🛒</div>
+                  Нет закупок за этот день
+                </div>
+              )}
+
+              <div style={{display:"flex",flexDirection:"column",gap:8}}>
+                {dayPurchases.map((p,idx)=>(
+                  <div key={p.id} style={{display:"flex",alignItems:"center",gap:12,padding:"12px 16px",background:"#fff",borderRadius:14,border:"1.5px solid #e8f5e9",transition:"all 0.15s"}}>
+                    <div style={{width:28,height:28,borderRadius:"50%",background:"#f1f8e9",color:"#81c784",fontSize:12,fontWeight:700,display:"flex",alignItems:"center",justifyContent:"center",fontFamily:"'Unbounded',sans-serif",flexShrink:0}}>
+                      {idx+1}
+                    </div>
+                    {editPurchase?.id===p.id?(
+                      <div style={{flex:1,display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
+                        <input autoFocus style={{...S.input,marginBottom:0,flex:2,minWidth:120}} value={editPurchase.supplier}
+                          onChange={e=>setEditPurchase({...editPurchase,supplier:e.target.value})}/>
+                        <div style={{display:"flex",alignItems:"center",gap:4,flex:1,minWidth:90}}>
+                          <input type="number" style={{...S.input,marginBottom:0,flex:1}} value={editPurchase.amount}
+                            onChange={e=>setEditPurchase({...editPurchase,amount:e.target.value})}/>
+                          <span style={{fontSize:12,color:"#9e9e9e"}}>₽</span>
+                        </div>
+                        <button style={S.okBtn} onClick={saveEditPurchase}>✓</button>
+                        <button style={S.cancelSmBtn} onClick={()=>setEditPurchase(null)}>✕</button>
+                      </div>
+                    ):(
+                      <>
+                        <span style={{flex:1,fontSize:14,fontWeight:600,color:"#2d4a2e"}}>{p.supplier}</span>
+                        <span style={{fontFamily:"'Unbounded',sans-serif",fontSize:15,fontWeight:700,color:"#e65100",whiteSpace:"nowrap"}}>
+                          {p.amount.toLocaleString("ru-RU")} ₽
+                        </span>
+                        <button style={{...S.okBtn,background:"#f1f8e9",color:"#4caf50",fontSize:13}} onClick={()=>setEditPurchase({...p,date:purchaseDate})}>✎</button>
+                        <button className="close-btn" style={S.removeBtn} onClick={()=>deletePurchase(purchaseDate,p.id)}>✕</button>
+                      </>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </>
+          )}
         </main>
 
         {/* MODALS */}
@@ -614,7 +997,21 @@
             </div>
           </div>
         )}
-        {showAddIngredient&&(
+        {showAddCook&&(
+          <div style={S.overlay} onClick={()=>setShowAddCook(false)}>
+            <div style={S.modal} onClick={e=>e.stopPropagation()}>
+              <div style={S.modalTitle}>👨‍🍳 Новый повар</div>
+              <input style={S.input} placeholder="Имя повара" value={newCook.name}
+                onChange={e=>setNewCook({...newCook,name:e.target.value})}/>
+              <input style={S.input} type="number" placeholder="Ставка в день (₽)" value={newCook.salary}
+                onChange={e=>setNewCook({...newCook,salary:e.target.value})}/>
+              <div style={S.modalActions}>
+                <button style={S.cancelBtn} onClick={()=>setShowAddCook(false)}>Отмена</button>
+                <button className="add-btn" style={S.addBtn} onClick={addCook}>Добавить</button>
+              </div>
+            </div>
+          </div>
+        )}
           <div style={S.overlay} onClick={()=>setShowAddIngredient(false)}>
             <div style={S.modal} onClick={e=>e.stopPropagation()}>
               <div style={S.modalTitle}>🥬 Новый ингредиент</div>

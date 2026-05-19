@@ -100,9 +100,46 @@
       .dish-grid{grid-template-columns:1fr;}
       .portions-big{font-size:36px;}
     }
+    @keyframes flashBanner {
+      0%,100%{opacity:1;transform:translateY(0);}
+      50%{opacity:0.85;transform:translateY(-3px);}
+    }
+    #notify-banner {
+      display:none;
+      position:fixed;
+      top:0; left:0; right:0;
+      z-index:999;
+      background:linear-gradient(135deg,#4caf50,#2e7d32);
+      color:#fff;
+      padding:20px 36px;
+      align-items:center;
+      gap:16px;
+      box-shadow:0 4px 32px rgba(76,175,80,0.5);
+      font-family:'Unbounded',sans-serif;
+    }
+    #notify-banner .bell { font-size:40px; animation: bellRing 0.5s ease 3; }
+    @keyframes bellRing {
+      0%,100%{transform:rotate(0deg);}
+      25%{transform:rotate(-20deg);}
+      75%{transform:rotate(20deg);}
+    }
+    #notify-banner .msg { flex:1; }
+    #notify-banner .msg-title { font-size:18px; font-weight:700; }
+    #notify-banner .msg-sub { font-size:13px; font-weight:400; margin-top:4px; opacity:0.9; font-family:'Geologica',sans-serif; }
+    #notify-banner .close-n { background:rgba(255,255,255,0.2); border:none; color:#fff; width:36px; height:36px; border-radius:50%; font-size:18px; cursor:pointer; }
   </style>
 </head>
 <body>
+
+<!-- Notification banner -->
+<div id="notify-banner">
+  <span class="bell">🔔</span>
+  <div class="msg">
+    <div class="msg-title">Администратор отправил меню!</div>
+    <div class="msg-sub">Проверьте список блюд и приступайте к приготовлению</div>
+  </div>
+  <button class="close-n" onclick="document.getElementById('notify-banner').style.display='none'">✕</button>
+</div>
 
 <header class="header">
   <div class="logo">
@@ -137,7 +174,7 @@
     messagingSenderId: "507953295640",
     appId: "1:507953295640:web:067e5c6a148db0166f2e6d"
   };
-  firebase.initializeApp(firebaseConfig);
+  if (!firebase.apps.length) firebase.initializeApp(firebaseConfig);
   const db = firebase.database();
 
   // ── Clock ──────────────────────────────────────────────────────────────────
@@ -280,6 +317,41 @@
     `;
   }
 
+  // ── Notification sound (Web Audio API) ────────────────────────────────────
+  function playChime() {
+    try {
+      const ctx = new (window.AudioContext || window.webkitAudioContext)();
+      const notes = [523.25, 659.25, 783.99, 1046.50]; // C5 E5 G5 C6
+      notes.forEach((freq, i) => {
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.type = "sine";
+        osc.frequency.value = freq;
+        const start = ctx.currentTime + i * 0.18;
+        gain.gain.setValueAtTime(0, start);
+        gain.gain.linearRampToValueAtTime(0.4, start + 0.05);
+        gain.gain.exponentialRampToValueAtTime(0.001, start + 0.5);
+        osc.start(start);
+        osc.stop(start + 0.5);
+      });
+    } catch(e) {}
+  }
+
+  function showNotification() {
+    playChime();
+    // Flash banner
+    const banner = document.getElementById("notify-banner");
+    if (banner) {
+      banner.style.display = "flex";
+      banner.style.animation = "none";
+      banner.offsetHeight; // reflow
+      banner.style.animation = "flashBanner 0.5s ease 3";
+      setTimeout(() => { banner.style.display = "none"; }, 8000);
+    }
+  }
+
   // ── Firebase listeners ─────────────────────────────────────────────────────
   db.ref(".info/connected").on("value", snap => {
     state.connected = !!snap.val();
@@ -301,6 +373,16 @@
     state.portions = data.portions || {};
     state.done = data.done || {};
     render();
+  });
+
+  // Listen for publish signal from admin
+  let lastPublished = null;
+  db.ref(`daymenu/${today}/published`).on("value", snap => {
+    const val = snap.val();
+    if (val && val !== lastPublished && lastPublished !== null) {
+      showNotification();
+    }
+    lastPublished = val;
   });
 </script>
 </body>
