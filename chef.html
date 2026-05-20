@@ -187,6 +187,7 @@
 
   // ── Render ────────────────────────────────────────────────────────────────
   function render(){
+    const scrollY = window.scrollY; // save scroll position
     const main=document.getElementById("main");
     const {dishes,ingredients,portions,done,actual,connected}=state;
     const active=dishes.filter(d=>(portions[d.id]||0)>0);
@@ -329,6 +330,8 @@
 
       <div class="footer">Эколавка · Кухонный экран · Данные синхронизируются автоматически</div>
     `;
+    // Restore scroll position after DOM rebuild
+    window.scrollTo(0, scrollY);
   }
 
   // ── Chat ──────────────────────────────────────────────────────────────────
