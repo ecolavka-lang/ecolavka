@@ -254,7 +254,7 @@
                 <span style="font-size:11px;color:#66bb6a;white-space:nowrap;">Факт:</span>
                 <input id="actual-${dish.id}" type="number" min="0" value="${a}" placeholder="${p}"
                   style="width:64px;background:#1a3320;border:1.5px solid ${isDone?'#4caf50':'#2e7d32'};border-radius:9px;color:#fff;font-family:'Unbounded',sans-serif;font-size:18px;font-weight:700;text-align:center;padding:5px 6px;outline:none;"
-                  onfocus="this.select();"
+                  onfocus="const t=this;setTimeout(function(){t.select();},0);"
                   oninput="setActual(${dish.id},this.value)"/>
                 <span style="font-size:12px;color:#4a7f4e;">порц.</span>
                 ${a!==''&&Number(a)<p?`<span style="font-size:10px;color:#f57f17;background:#1e2a00;padding:2px 7px;border-radius:7px;">−${p-Number(a)}</span>`:''}
@@ -312,11 +312,11 @@
             <span style="font-size:13px;color:#c8e6c9;font-weight:500">${g.name}</span>
             <span style="text-align:right;font-family:'Unbounded',sans-serif;font-size:13px;font-weight:700;color:#4caf50">${g.total%1===0?g.total:g.total.toFixed(3)} ${g.unit}</span>
             <div style="display:flex;align-items:center;gap:5px;justify-content:center;">
-              <input type="number" min="0" step="0.1"
+              <input type="number" min="0" step="0.001"
                 value="${shoppingList[g.id]||''}"
                 placeholder="0"
                 style="width:60px;background:#1a3320;border:1.5px solid #2e7d32;border-radius:8px;color:#fff;font-family:'Unbounded',sans-serif;font-size:13px;font-weight:700;text-align:center;padding:4px 5px;outline:none;"
-                onfocus="this.select();"
+                onfocus="const t=this;setTimeout(function(){t.select();},0);"
                 oninput="setShoppingQty(${g.id},this.value)"
                 onblur="if(this.value===''){this.value='0';}this.style.borderColor='#2e7d32';"/>
               <span style="font-size:10px;color:#4a7f4e">${g.unit}</span>
@@ -395,6 +395,15 @@
   db.ref(`daymenu/${today}/published`).on("value",snap=>{const v=snap.val();if(v&&v!==lastPublished&&lastPublished!==null)showNotification();lastPublished=v;});
 
   let allChatMsgs=[],prevChatCount=null;
+  // Auto-cleanup chat older than 3 months
+  (function(){
+    const cutoff=Date.now()-90*24*60*60*1000;
+    db.ref("chat").once("value",snap=>{
+      const data=snap.val();if(!data)return;
+      Object.entries(data).forEach(([k,m])=>{if(m.ts&&m.ts<cutoff)db.ref(`chat/${k}`).remove().catch(()=>{});});
+    });
+  })();
+
   db.ref("chat").limitToLast(100).on("value",snap=>{
     const data=snap.val();
     allChatMsgs=data?Object.values(data).sort((a,b)=>a.ts-b.ts):[];
